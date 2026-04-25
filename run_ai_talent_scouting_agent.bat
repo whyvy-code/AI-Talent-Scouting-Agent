@@ -3,8 +3,7 @@ setlocal
 
 cd /d "%~dp0"
 
-set "SCRIPT_PATH=%~dp0ai_talent_scouting_gemini_clean.py"
-set "REQUIREMENTS_PATH=%~dp0requirements.txt"
+set "SCRIPT_PATH=C:\Users\Vikas Yadav\Downloads\ai_talent_scouting_gemini_clean.py"
 
 if not exist "%SCRIPT_PATH%" (
   echo [ERROR] Script not found:
@@ -15,11 +14,7 @@ if not exist "%SCRIPT_PATH%" (
 
 echo Installing/updating required packages...
 py -m pip install --upgrade pip >nul 2>&1
-if exist "%REQUIREMENTS_PATH%" (
-  py -m pip install -r "%REQUIREMENTS_PATH%"
-) else (
-  py -m pip install streamlit google-genai pypdf
-)
+py -m pip install streamlit google-genai pypdf
 if errorlevel 1 (
   echo [ERROR] Package installation failed.
   pause

@@ -1,6 +1,6 @@
 # AI-Powered Talent Scouting and Engagement Agent
 
-An AI recruitment assistant that parses a Job Description (JD), matches candidate profiles, engages candidates through a live conversation panel, and returns a ranked shortlist based on:
+An AI recruitment assistant that parses a Job Description (JD), matches candidate profiles, simulates outreach interest, and returns a ranked shortlist based on:
 
 - Match Score
 - Interest Score
@@ -15,10 +15,9 @@ This project is built for hackathon submission and includes both:
 This prototype implements:
 
 - JD parsing from uploaded PDF (or pasted text)
-- Candidate discovery from built-in sample pool + live submitted candidate profiles
+- Candidate discovery from a local candidate pool
 - Explainable matching with overlap logic
-- Conversational outreach simulation for sample candidates
-- Live candidate conversation agent with genuine-interest assessment
+- Conversational outreach simulation
 - Ranked output with score breakdown
 
 ## Project Structure
@@ -43,9 +42,7 @@ This prototype implements:
 - `skill_overlap = matched_skills / total_required_skills`
 - `experience_fit = min(candidate_exp / required_exp, 1)`
 - `match_score = 0.6 * skill_overlap + 0.4 * experience_fit`
-- `interest_score`:
-  - for live candidates: guided interview answers matched to JD preferences
-  - for sample candidates: simulated response sentiment
+- `interest_score` from simulated response sentiment
 - `final_score = 0.7 * match_score + 0.3 * interest_score`
 
 ## Setup and Run (Local, Windows)
@@ -85,36 +82,18 @@ streamlit run ai_talent_scouting_gemini_clean.py
 ## How to Use
 
 1. Open app in browser.
-2. Use the **right panel** to submit candidate profile data:
-   - name
-   - skills (comma separated)
-   - experience
-   - domain (`IT` or `Sales`)
-3. Complete the guided live interview in the right panel:
-   - `Q1: Open to opportunities?`
-   - `Q2: Expected salary? (LPA)`
-   - `Q3: Remote preference?`
-4. The app computes genuine-interest score using JD alignment for openness, salary, and remote preference.
-5. Upload JD PDF (or paste JD text) in the **left panel**.
-6. Click `Find Candidates`.
-7. Review:
+2. Upload JD PDF (or paste JD text).
+3. Click `Find Candidates`.
+4. Review:
    - parsed JD
    - ranked candidates
-   - explanation and conversation transcript
-   - combined results from sample + live submitted candidates
-
-## UI Layout
-
-- Left panel: JD parsing and ranked candidate search
-- Right panel: live candidate profile submission + conversation agent
-- Guided interview experience in right panel with step-by-step Q1/Q2/Q3 flow
-- Wide layout with visual center divider for easier side-by-side usage
+   - explanation and simulated chat
 
 ## Fallback Behavior (Important for Demo Reliability)
 
 If Gemini is unavailable due to quota/rate limits:
 
-- app automatically switches to non-LLM fallback for JD parsing/simulated conversation
+- app automatically switches to non-LLM fallback for JD parsing/conversation
 - still produces deterministic shortlist and scores
 - UI clearly shows fallback warning
 
@@ -133,9 +112,8 @@ If Gemini is unavailable due to quota/rate limits:
 
 ## Limitations
 
-- Built-in sample candidate data is static (no external ATS integration yet)
-- Live submitted candidates are session-based (not persisted across app restarts)
-- Genuine-interest scoring for live candidates is rule-based and depends on JD signal quality
+- Uses static sample candidate pool (no external ATS integration yet)
+- Interest simulation is synthetic
 - Fallback parser is heuristic-based
 
 ## Future Improvements
