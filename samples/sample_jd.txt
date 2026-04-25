@@ -1,0 +1,20 @@
+Job Title: Manager - Sales Operations
+
+We are looking for a Sales Operations Manager with 4+ years of experience in sales analytics and CRM operations.
+
+Required skills:
+- Salesforce / CRM tools
+- Forecasting and pipeline reporting
+- Excel and dashboarding
+- Stakeholder communication
+- Process optimization
+
+Preferred:
+- SQL or BI exposure
+- Experience with B2B SaaS sales teams
+
+Responsibilities:
+- Build and maintain sales dashboards
+- Improve sales process efficiency
+- Own forecasting cadence and reporting accuracy
+- Partner with sales leadership on performance insights

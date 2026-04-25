@@ -1,0 +1,41 @@
+{
+  "jd": {
+    "skills": ["Salesforce", "CRM", "Forecasting", "Excel", "Communication", "Operations"],
+    "experience": 4,
+    "role": "Manager",
+    "keywords": ["analytics", "dashboard", "forecasting", "pipeline", "reporting", "sales"]
+  },
+  "results": [
+    {
+      "name": "Manish Gupta",
+      "domain": "Sales",
+      "match_score": 0.91,
+      "interest_score": 1.0,
+      "final_score": 0.94,
+      "explanation": "Matched 5 required skills",
+      "conversation": "Yes, this role looks aligned with my background.\nI would like to discuss the next steps."
+    },
+    {
+      "name": "Aman Khanna",
+      "domain": "IT",
+      "match_score": 0.88,
+      "interest_score": 1.0,
+      "final_score": 0.92,
+      "explanation": "Matched 4 required skills",
+      "conversation": "Candidate: Yes, I am interested and available for next steps.\nAgent: Great, what motivates your interest in this role, and when would you be available for an interview?"
+    },
+    {
+      "name": "Rohit Sharma",
+      "domain": "Sales",
+      "match_score": 0.8,
+      "interest_score": 0.5,
+      "final_score": 0.71,
+      "explanation": "Matched 3 required skills",
+      "conversation": "I am interested, but I may need role flexibility.\nHappy to discuss expectations."
+    }
+  ],
+  "notes": {
+    "candidate_pool": "Results can include built-in sample candidates plus live submitted candidates.",
+    "ui": "Left panel handles JD search. Right panel handles live candidate conversation."
+  }
+}
