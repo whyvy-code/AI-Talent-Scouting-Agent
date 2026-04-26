@@ -24,6 +24,7 @@ PREFERRED_MODELS = [
     "gemini-1.5-flash",
 ]
 _WORKING_MODEL = None
+TOP_RANK_LIMIT = 5
 FALLBACK_SKILLS = [
     "python",
     "sql",
@@ -205,6 +206,15 @@ def compute_interest_score(convo: str) -> float:
     if "not" in text or "no" in text:
         return 0.0
     return 0.5
+
+
+def summarize_conversation_one_line(conversation: str, interest_score: float) -> str:
+    lines = [ln.strip() for ln in (conversation or "").splitlines() if ln.strip()]
+    first_line = lines[0] if lines else "No interview transcript available."
+    tone = "high interest" if interest_score >= 0.8 else "moderate interest" if interest_score >= 0.5 else "low interest"
+    if len(first_line) > 120:
+        first_line = f"{first_line[:117]}..."
+    return f"{first_line} ({tone})"
 
 
 def load_candidates() -> list[dict]:
@@ -396,6 +406,95 @@ def ensure_agent_questions(history: list[dict], answers: dict, candidate_name: s
             )
 
 
+def build_resume_fallback_profile(resume_text: str, resume_name: str = "") -> dict:
+    lower = (resume_text or "").lower()
+    skills = [skill.title() for skill in FALLBACK_SKILLS if skill in lower][:8]
+    exp_match = re.search(r"(\d+)\s*\+?\s*(?:years|yrs)", lower)
+    experience = int(exp_match.group(1)) if exp_match else 0
+    name = Path(resume_name).stem.replace("_", " ").replace("-", " ").strip() or "Resume Candidate"
+    domain = "Sales" if any(x in lower for x in ["sales", "crm", "lead", "pipeline"]) else "IT"
+    return {"name": name.title(), "skills": skills or ["Communication"], "experience": experience, "domain": domain}
+
+
+def generate_resume_interview_plan(resume_text: str, jd_text: str, resume_name: str = "") -> dict:
+    prompt = f"""
+You are building a candidate interview plan.
+Use the resume and optional job description to create a tailored interview.
+Return ONLY valid JSON with keys:
+candidate_name (string), skills (list), experience (number), domain (string: IT or Sales), questions (list of 3 to 5 strings).
+Questions must vary by resume content and check genuine interest in this role.
+
+Resume:
+{resume_text}
+
+Job description (may be empty):
+{jd_text}
+"""
+    try:
+        plan = extract_json(ask_gemini(prompt))
+        profile = {
+            "name": (plan.get("candidate_name") or "").strip() or build_resume_fallback_profile(resume_text, resume_name)["name"],
+            "skills": [str(s).strip().title() for s in plan.get("skills", []) if str(s).strip()],
+            "experience": int(plan.get("experience", 0) or 0),
+            "domain": (plan.get("domain") or "").strip().title(),
+        }
+        if profile["domain"] not in {"IT", "Sales"}:
+            profile["domain"] = build_resume_fallback_profile(resume_text, resume_name)["domain"]
+        if not profile["skills"]:
+            profile["skills"] = build_resume_fallback_profile(resume_text, resume_name)["skills"]
+        questions = [str(q).strip() for q in plan.get("questions", []) if str(q).strip()]
+        if len(questions) < 3:
+            raise RuntimeError("Insufficient questions from AI interview planner.")
+        return {"profile": profile, "questions": questions[:5]}
+    except Exception:
+        profile = build_resume_fallback_profile(resume_text, resume_name)
+        questions = [
+            f"Your resume highlights {profile['domain']} skills. What motivates you to pursue this role now?",
+            "What kind of responsibilities in this job are you most excited about?",
+            "If this role matches your goals, how soon can you move to the next interview step?",
+        ]
+        return {"profile": profile, "questions": questions}
+
+
+def compute_rule_based_interest_from_qa(qa_pairs: list[dict]) -> tuple[float, str]:
+    text = " ".join((qa.get("answer", "") or "").lower() for qa in qa_pairs)
+    positive = sum(1 for t in ["yes", "interested", "excited", "join", "available", "aligned"] if t in text)
+    negative = sum(1 for t in ["no", "not interested", "later", "unsure", "decline"] if t in text)
+    if negative > positive:
+        return 0.2, "Candidate answers indicate low intent to proceed."
+    if positive >= 3:
+        return 0.9, "Candidate answers show strong interest and readiness."
+    if positive > 0:
+        return 0.7, "Candidate answers indicate moderate interest."
+    return 0.5, "Interest is unclear from current interview answers."
+
+
+def score_interest_from_ai_interview(jd_text: str, resume_text: str, qa_pairs: list[dict]) -> tuple[float, str]:
+    prompt = f"""
+You are scoring genuine candidate interest for a role.
+Use job context, resume context, and interview Q&A.
+Return ONLY valid JSON with keys:
+interest_score (number between 0 and 1), note (string, 1 short sentence).
+
+Job description:
+{jd_text}
+
+Resume:
+{resume_text}
+
+Interview QA:
+{json.dumps(qa_pairs, ensure_ascii=True)}
+"""
+    try:
+        parsed = extract_json(ask_gemini(prompt))
+        score = float(parsed.get("interest_score", 0.5))
+        score = min(max(score, 0.0), 1.0)
+        note = (parsed.get("note") or "").strip() or "Interest scored from AI interview responses."
+        return round(score, 2), note
+    except Exception:
+        return compute_rule_based_interest_from_qa(qa_pairs)
+
+
 def compute_final_scores(candidates: list[dict], interest_overrides: dict | None = None) -> list[dict]:
     interest_overrides = interest_overrides or {}
     for c in candidates:
@@ -405,6 +504,7 @@ def compute_final_scores(candidates: list[dict], interest_overrides: dict | None
             interest = compute_interest_score(c.get("conversation", ""))
         c["interest_score"] = interest
         c["final_score"] = round(0.7 * c["match_score"] + 0.3 * interest, 2)
+        c["conversation_summary"] = summarize_conversation_one_line(c.get("conversation", ""), interest)
     return sorted(candidates, key=lambda x: x["final_score"], reverse=True)
 
 
@@ -430,6 +530,8 @@ def run_pipeline(
         fallback_reason = "Gemini unavailable. Using deterministic fallback."
 
     matched = match_candidates(structured_jd, candidates)
+    # Compute conversations/summaries only for top matched candidates to reduce latency.
+    matched = sorted(matched, key=lambda x: x["match_score"], reverse=True)[:TOP_RANK_LIMIT]
     live_conversations = live_conversations or {}
     live_interest_scores = live_interest_scores or {}
 
@@ -449,7 +551,7 @@ def run_pipeline(
             c["conversation"] = simulate_conversation_rule_based(c, structured_jd)
     return (
         structured_jd,
-        compute_final_scores(matched, interest_overrides=live_interest_scores),
+        compute_final_scores(matched, interest_overrides=live_interest_scores)[:TOP_RANK_LIMIT],
         fallback_used,
         fallback_reason,
     )
@@ -491,12 +593,16 @@ with st.expander("Gemini API Key", expanded=st.session_state.get("gemini_expande
             st.session_state["gemini_api_key"] = st.session_state.get("gemini_key_input", "").strip()
             st.session_state["gemini_expander_open"] = False
             st.session_state["startup_check_done"] = False
+            st.session_state["candidate_panel_force_fallback"] = False
+            st.session_state["candidate_panel_fallback_reason"] = ""
             st.rerun()
     with key_col2:
         if st.button("Use Fallback Mode", key="clear_gemini_key"):
             st.session_state["gemini_api_key"] = ""
             st.session_state["gemini_expander_open"] = False
             st.session_state["startup_check_done"] = False
+            st.session_state["candidate_panel_force_fallback"] = True
+            st.session_state["candidate_panel_fallback_reason"] = "Gemini key not active. Using fallback candidate panel."
             st.rerun()
 
 if "startup_check_done" not in st.session_state or not st.session_state.get("startup_check_done"):
@@ -527,6 +633,12 @@ if "scroll_to_interview_candidate" not in st.session_state:
     st.session_state["scroll_to_interview_candidate"] = ""
 if "selected_live_candidate" not in st.session_state:
     st.session_state["selected_live_candidate"] = ""
+if "candidate_panel_force_fallback" not in st.session_state:
+    st.session_state["candidate_panel_force_fallback"] = False
+if "candidate_panel_fallback_reason" not in st.session_state:
+    st.session_state["candidate_panel_fallback_reason"] = ""
+if "ai_interview_sessions" not in st.session_state:
+    st.session_state["ai_interview_sessions"] = {}
 
 left_col, divider_col, right_col = st.columns([1.15, 0.08, 1.15], gap="large")
 current_jd_text = ""
@@ -587,7 +699,7 @@ with left_col:
                 st.write(f"Interest: {c['interest_score']}")
                 st.write(f"Final: {c['final_score']}")
                 st.write(f"Why: {c['explanation']}")
-                st.write(f"Chat: {c['conversation']}")
+                st.write(f"Chat Summary: {c.get('conversation_summary', 'No summary available.')}")
         except Exception as exc:
             st.error(f"Failed to process candidates: {exc}")
 
@@ -608,123 +720,266 @@ with divider_col:
 
 with right_col:
     st.subheader("Live Candidate Conversation Agent")
-    with st.form("candidate_profile_form", clear_on_submit=True):
-        candidate_name = st.text_input("Candidate Name")
-        candidate_skills_text = st.text_input("Skills (comma separated)")
-        candidate_experience = st.number_input("Experience (years)", min_value=0, max_value=50, value=0, step=1)
-        candidate_domain = st.selectbox("Domain", options=["IT", "Sales"], index=0)
-        add_candidate = st.form_submit_button("Submit Candidate Profile")
+    llm_candidate_face_enabled = (
+        bool(st.session_state.get("gemini_api_key"))
+        and bool(st.session_state.get("startup_check_ok"))
+        and not st.session_state.get("candidate_panel_force_fallback")
+    )
 
-    if add_candidate:
-        parsed_skills = [s.strip() for s in candidate_skills_text.split(",") if s.strip()]
-        if not candidate_name.strip():
-            st.error("Candidate name is required.")
-        elif not parsed_skills:
-            st.error("Please add at least one skill.")
-        else:
-            profile = {
-                "name": candidate_name.strip(),
-                "skills": parsed_skills,
-                "experience": int(candidate_experience),
-                "domain": candidate_domain.strip() or "General",
-            }
-            st.session_state["live_candidates"] = [
-                c for c in st.session_state["live_candidates"] if c.get("name") != profile["name"]
-            ]
-            st.session_state["live_candidates"].append(profile)
-            st.session_state["candidate_chats"].setdefault(profile["name"], [])
-            st.session_state["candidate_interest_scores"].setdefault(profile["name"], 0.5)
-            st.session_state["candidate_interest_notes"].setdefault(profile["name"], "Interest is currently unclear.")
-            st.session_state["candidate_interviews"][profile["name"]] = {
-                "open_to_opportunities": "",
-                "expected_salary_lpa": None,
-                "remote_preference": "",
-            }
-            st.session_state["scroll_to_interview_candidate"] = profile["name"]
-            st.session_state["selected_live_candidate"] = profile["name"]
-            st.success(f"Candidate profile added for {profile['name']}.")
-
-    live_candidate_names = [c.get("name") for c in st.session_state["live_candidates"]]
-    if not live_candidate_names:
-        st.info("Submit candidate details to start live conversation.")
-    else:
-        if st.session_state.get("selected_live_candidate") not in live_candidate_names:
-            st.session_state["selected_live_candidate"] = live_candidate_names[0]
-        selected_idx = live_candidate_names.index(st.session_state["selected_live_candidate"])
-        selected_candidate = st.selectbox("Select Candidate", live_candidate_names, index=selected_idx)
-        st.session_state["selected_live_candidate"] = selected_candidate
-        history = st.session_state["candidate_chats"].setdefault(selected_candidate, [])
-        interview = st.session_state["candidate_interviews"].setdefault(
-            selected_candidate,
-            {"open_to_opportunities": "", "expected_salary_lpa": None, "remote_preference": ""},
+    if llm_candidate_face_enabled:
+        st.caption("Face 1: AI Resume Interview (Gemini)")
+        resume_pdf = st.file_uploader(
+            "Upload Resume PDF",
+            type=["pdf"],
+            key="resume_pdf_uploader_ai",
+            help="AI reads resume and asks 3-5 tailored questions.",
         )
-        ensure_agent_questions(history, interview, selected_candidate)
-
-        st.markdown('<div id="live-interview-section"></div>', unsafe_allow_html=True)
-        if st.session_state.get("scroll_to_interview_candidate") == selected_candidate:
-            components.html(
-                """
-                <script>
-                    const target = window.parent.document.getElementById("live-interview-section");
-                    if (target) {
-                        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        if st.button("Start AI Interview", key="start_ai_interview_btn"):
+            if resume_pdf is None:
+                st.error("Please upload a resume PDF to start AI interview.")
+            else:
+                try:
+                    resume_text = extract_text_from_uploaded_pdf(resume_pdf)
+                    if not resume_text:
+                        raise RuntimeError("Resume PDF is empty or text extraction failed.")
+                    plan = generate_resume_interview_plan(
+                        resume_text=resume_text,
+                        jd_text=current_jd_text,
+                        resume_name=getattr(resume_pdf, "name", ""),
+                    )
+                    profile = plan["profile"]
+                    st.session_state["live_candidates"] = [
+                        c for c in st.session_state["live_candidates"] if c.get("name") != profile["name"]
+                    ]
+                    st.session_state["live_candidates"].append(profile)
+                    st.session_state["selected_live_candidate"] = profile["name"]
+                    st.session_state["scroll_to_interview_candidate"] = profile["name"]
+                    st.session_state["candidate_chats"][profile["name"]] = []
+                    st.session_state["candidate_interest_scores"][profile["name"]] = 0.5
+                    st.session_state["candidate_interest_notes"][profile["name"]] = "AI interview in progress."
+                    st.session_state["ai_interview_sessions"][profile["name"]] = {
+                        "resume_text": resume_text,
+                        "questions": plan["questions"],
+                        "answers": [],
+                        "current_index": 0,
+                        "done": False,
                     }
-                </script>
-                """,
-                height=0,
-            )
-            st.session_state["scroll_to_interview_candidate"] = ""
+                    st.success(f"AI interview initialized for {profile['name']}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.session_state["candidate_panel_force_fallback"] = True
+                    st.session_state["candidate_panel_fallback_reason"] = (
+                        f"Switched to fallback candidate panel due to Gemini/API issue: {exc}"
+                    )
+                    st.rerun()
 
-        st.caption("Live Interview")
-        with st.container(border=True):
-            for item in history:
-                speaker = "Candidate" if item.get("role") == "candidate" else "Agent"
-                st.markdown(f"**{speaker}:** {item.get('text', '')}")
+        ai_names = [
+            n
+            for n in [c.get("name") for c in st.session_state["live_candidates"]]
+            if n in st.session_state.get("ai_interview_sessions", {})
+        ]
+        if ai_names:
+            if st.session_state.get("selected_live_candidate") not in ai_names:
+                st.session_state["selected_live_candidate"] = ai_names[0]
+            selected_idx = ai_names.index(st.session_state["selected_live_candidate"])
+            selected_candidate = st.selectbox(
+                "Select AI Interview Candidate",
+                ai_names,
+                index=selected_idx,
+                key="ai_selected_candidate",
+            )
+            st.session_state["selected_live_candidate"] = selected_candidate
+            session = st.session_state["ai_interview_sessions"][selected_candidate]
+            history = st.session_state["candidate_chats"].setdefault(selected_candidate, [])
+            idx = int(session.get("current_index", 0))
+            questions = session.get("questions", [])
+            if not session.get("done") and idx < len(questions):
+                current_q = questions[idx]
+                # Ensure the active question is added before rendering chat UI.
+                if not history or history[-1].get("text") != current_q:
+                    history.append({"role": "agent", "text": current_q})
 
-        if not interview.get("open_to_opportunities"):
-            q1 = st.radio(
-                "Q1: Open to opportunities?",
-                options=["Yes", "Maybe", "No"],
-                horizontal=True,
-                key=f"q1_{selected_candidate}",
+            st.markdown('<div id="live-interview-section"></div>', unsafe_allow_html=True)
+            if st.session_state.get("scroll_to_interview_candidate") == selected_candidate:
+                components.html(
+                    """
+                    <script>
+                        const target = window.parent.document.getElementById("live-interview-section");
+                        if (target) {
+                            target.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }
+                    </script>
+                    """,
+                    height=0,
+                )
+                st.session_state["scroll_to_interview_candidate"] = ""
+
+            st.caption("AI Resume Interview Chat")
+            with st.container(border=True):
+                for item in history:
+                    speaker = "Candidate" if item.get("role") == "candidate" else "Agent"
+                    st.markdown(f"**{speaker}:** {item.get('text', '')}")
+
+            if not session.get("done"):
+                if idx < len(questions):
+                    current_q = questions[idx]
+                    answer = st.text_area(
+                        f"Answer Question {idx + 1}",
+                        key=f"ai_answer_{selected_candidate}_{idx}",
+                        placeholder="Type your answer here...",
+                    )
+                    if st.button("Submit Answer", key=f"submit_ai_answer_{selected_candidate}_{idx}"):
+                        if answer.strip():
+                            history.append({"role": "candidate", "text": answer.strip()})
+                            session["answers"].append({"question": current_q, "answer": answer.strip()})
+                            session["current_index"] = idx + 1
+                            if session["current_index"] >= len(questions):
+                                score, note = score_interest_from_ai_interview(
+                                    current_jd_text,
+                                    session.get("resume_text", ""),
+                                    session.get("answers", []),
+                                )
+                                st.session_state["candidate_interest_scores"][selected_candidate] = score
+                                st.session_state["candidate_interest_notes"][selected_candidate] = note
+                                session["done"] = True
+                            st.rerun()
+                else:
+                    session["done"] = True
+                    st.rerun()
+            else:
+                st.success("AI interview complete for this candidate.")
+
+            current_score = st.session_state["candidate_interest_scores"].get(selected_candidate, 0.5)
+            current_note = st.session_state["candidate_interest_notes"].get(
+                selected_candidate, "Interest is currently unclear."
             )
-            if st.button("Submit Q1", key=f"submit_q1_{selected_candidate}"):
-                interview["open_to_opportunities"] = q1.lower()
-                history.append({"role": "candidate", "text": q1})
-                ensure_agent_questions(history, interview, selected_candidate)
-                st.rerun()
-        elif interview.get("expected_salary_lpa") is None:
-            q2 = st.number_input(
-                "Q2: Expected salary? (LPA)",
-                min_value=1.0,
-                max_value=200.0,
-                value=8.0,
-                step=0.5,
-                key=f"q2_{selected_candidate}",
-            )
-            if st.button("Submit Q2", key=f"submit_q2_{selected_candidate}"):
-                interview["expected_salary_lpa"] = float(q2)
-                history.append({"role": "candidate", "text": f"{q2} LPA"})
-                ensure_agent_questions(history, interview, selected_candidate)
-                st.rerun()
-        elif not interview.get("remote_preference"):
-            q3 = st.selectbox(
-                "Q3: Remote preference?",
-                options=["Remote", "Hybrid", "Onsite"],
-                key=f"q3_{selected_candidate}",
-            )
-            if st.button("Submit Q3", key=f"submit_q3_{selected_candidate}"):
-                interview["remote_preference"] = q3
-                history.append({"role": "candidate", "text": q3})
-                ensure_agent_questions(history, interview, selected_candidate)
-                score, note = assess_genuine_interest_from_answers(current_jd_text, interview)
-                st.session_state["candidate_interest_scores"][selected_candidate] = score
-                st.session_state["candidate_interest_notes"][selected_candidate] = note
-                st.rerun()
+            st.caption(f"Genuine Interest Score: {current_score}")
+            st.caption(current_note)
         else:
-            st.success("Interview complete for this candidate.")
+            st.info("Upload resume PDF and click 'Start AI Interview' to begin dynamic interview.")
+    else:
+        st.caption("Face 2: Fallback Candidate Panel")
+        if st.session_state.get("candidate_panel_fallback_reason"):
+            st.warning(st.session_state["candidate_panel_fallback_reason"])
+        with st.form("candidate_profile_form", clear_on_submit=True):
+            candidate_name = st.text_input("Candidate Name")
+            candidate_skills_text = st.text_input("Skills (comma separated)")
+            candidate_experience = st.number_input("Experience (years)", min_value=0, max_value=50, value=0, step=1)
+            candidate_domain = st.selectbox("Domain", options=["IT", "Sales"], index=0)
+            add_candidate = st.form_submit_button("Submit Candidate Profile")
 
-        current_score = st.session_state["candidate_interest_scores"].get(selected_candidate, 0.5)
-        current_note = st.session_state["candidate_interest_notes"].get(selected_candidate, "Interest is currently unclear.")
-        st.caption(f"Genuine Interest Score: {current_score}")
-        st.caption(current_note)
+        if add_candidate:
+            parsed_skills = [s.strip() for s in candidate_skills_text.split(",") if s.strip()]
+            if not candidate_name.strip():
+                st.error("Candidate name is required.")
+            elif not parsed_skills:
+                st.error("Please add at least one skill.")
+            else:
+                profile = {
+                    "name": candidate_name.strip(),
+                    "skills": parsed_skills,
+                    "experience": int(candidate_experience),
+                    "domain": candidate_domain.strip() or "General",
+                }
+                st.session_state["live_candidates"] = [
+                    c for c in st.session_state["live_candidates"] if c.get("name") != profile["name"]
+                ]
+                st.session_state["live_candidates"].append(profile)
+                st.session_state["candidate_chats"].setdefault(profile["name"], [])
+                st.session_state["candidate_interest_scores"].setdefault(profile["name"], 0.5)
+                st.session_state["candidate_interest_notes"].setdefault(profile["name"], "Interest is currently unclear.")
+                st.session_state["candidate_interviews"][profile["name"]] = {
+                    "open_to_opportunities": "",
+                    "expected_salary_lpa": None,
+                    "remote_preference": "",
+                }
+                st.session_state["scroll_to_interview_candidate"] = profile["name"]
+                st.session_state["selected_live_candidate"] = profile["name"]
+                st.success(f"Candidate profile added for {profile['name']}.")
+
+        live_candidate_names = [c.get("name") for c in st.session_state["live_candidates"]]
+        if not live_candidate_names:
+            st.info("Submit candidate details to start live conversation.")
+        else:
+            if st.session_state.get("selected_live_candidate") not in live_candidate_names:
+                st.session_state["selected_live_candidate"] = live_candidate_names[0]
+            selected_idx = live_candidate_names.index(st.session_state["selected_live_candidate"])
+            selected_candidate = st.selectbox("Select Candidate", live_candidate_names, index=selected_idx)
+            st.session_state["selected_live_candidate"] = selected_candidate
+            history = st.session_state["candidate_chats"].setdefault(selected_candidate, [])
+            interview = st.session_state["candidate_interviews"].setdefault(
+                selected_candidate,
+                {"open_to_opportunities": "", "expected_salary_lpa": None, "remote_preference": ""},
+            )
+            ensure_agent_questions(history, interview, selected_candidate)
+
+            st.markdown('<div id="live-interview-section"></div>', unsafe_allow_html=True)
+            if st.session_state.get("scroll_to_interview_candidate") == selected_candidate:
+                components.html(
+                    """
+                    <script>
+                        const target = window.parent.document.getElementById("live-interview-section");
+                        if (target) {
+                            target.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }
+                    </script>
+                    """,
+                    height=0,
+                )
+                st.session_state["scroll_to_interview_candidate"] = ""
+
+            st.caption("Live Interview")
+            with st.container(border=True):
+                for item in history:
+                    speaker = "Candidate" if item.get("role") == "candidate" else "Agent"
+                    st.markdown(f"**{speaker}:** {item.get('text', '')}")
+
+            if not interview.get("open_to_opportunities"):
+                q1 = st.radio(
+                    "Q1: Open to opportunities?",
+                    options=["Yes", "Maybe", "No"],
+                    horizontal=True,
+                    key=f"q1_{selected_candidate}",
+                )
+                if st.button("Submit Q1", key=f"submit_q1_{selected_candidate}"):
+                    interview["open_to_opportunities"] = q1.lower()
+                    history.append({"role": "candidate", "text": q1})
+                    ensure_agent_questions(history, interview, selected_candidate)
+                    st.rerun()
+            elif interview.get("expected_salary_lpa") is None:
+                q2 = st.number_input(
+                    "Q2: Expected salary? (LPA)",
+                    min_value=1.0,
+                    max_value=200.0,
+                    value=8.0,
+                    step=0.5,
+                    key=f"q2_{selected_candidate}",
+                )
+                if st.button("Submit Q2", key=f"submit_q2_{selected_candidate}"):
+                    interview["expected_salary_lpa"] = float(q2)
+                    history.append({"role": "candidate", "text": f"{q2} LPA"})
+                    ensure_agent_questions(history, interview, selected_candidate)
+                    st.rerun()
+            elif not interview.get("remote_preference"):
+                q3 = st.selectbox(
+                    "Q3: Remote preference?",
+                    options=["Remote", "Hybrid", "Onsite"],
+                    key=f"q3_{selected_candidate}",
+                )
+                if st.button("Submit Q3", key=f"submit_q3_{selected_candidate}"):
+                    interview["remote_preference"] = q3
+                    history.append({"role": "candidate", "text": q3})
+                    ensure_agent_questions(history, interview, selected_candidate)
+                    score, note = assess_genuine_interest_from_answers(current_jd_text, interview)
+                    st.session_state["candidate_interest_scores"][selected_candidate] = score
+                    st.session_state["candidate_interest_notes"][selected_candidate] = note
+                    st.rerun()
+            else:
+                st.success("Interview complete for this candidate.")
+
+            current_score = st.session_state["candidate_interest_scores"].get(selected_candidate, 0.5)
+            current_note = st.session_state["candidate_interest_notes"].get(
+                selected_candidate, "Interest is currently unclear."
+            )
+            st.caption(f"Genuine Interest Score: {current_score}")
+            st.caption(current_note)

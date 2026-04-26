@@ -18,7 +18,9 @@ This prototype implements:
 - Candidate discovery from built-in sample pool + live submitted candidate profiles
 - Explainable matching with overlap logic
 - Conversational outreach simulation for sample candidates
-- Live candidate conversation agent with genuine-interest assessment
+- AI-first resume interview face (3-5 dynamic questions driven by resume content)
+- Automatic fallback face with guided Q1/Q2/Q3 interview when Gemini is unavailable/rate-limited
+- Top-5 ranked shortlist output for faster recruiter review
 - Ranked output with score breakdown
 
 ## Project Structure
@@ -44,13 +46,21 @@ This prototype implements:
 - `experience_fit = min(candidate_exp / required_exp, 1)`
 - `match_score = 0.6 * skill_overlap + 0.4 * experience_fit`
 - `interest_score`:
-  - for live candidates: guided interview answers matched to JD preferences
+  - for live candidates in AI face: score from resume-aware dynamic interview answers
+  - for live candidates in fallback face: guided interview answers matched to JD preferences
   - for sample candidates: simulated response sentiment
 - `final_score = 0.7 * match_score + 0.3 * interest_score`
+- ranking output is capped to top 5 candidates
 
 ## Setup and Run (Local, Windows)
 
-### Option A: One-click run
+### Option A: Run via hosted URL
+
+Open:
+
+`https://ai-talent-scouting-agent-bvzxjl3ztgvdc5cs3gdnnp.streamlit.app/`
+
+### Option B: One-click local run
 
 Double-click:
 
@@ -63,7 +73,7 @@ It will:
 - launch app at `http://localhost:8501`
 - in the `Gemini API Key` section, use `Use Key` (LLM mode) or `Use Fallback Mode`
 
-### Option B: Manual run
+### Option C: Manual local run
 
 1. Install dependencies:
 
@@ -94,37 +104,40 @@ streamlit run ai_talent_scouting_gemini_clean.py
 ## How to Use
 
 1. Open app in browser.
-2. Use the **right panel** to submit candidate profile data:
-   - name
-   - skills (comma separated)
-   - experience
-   - domain (`IT` or `Sales`)
-3. After profile submission, app auto-selects that candidate and scrolls to the live interview section.
-4. Complete the guided live interview in the right panel:
-   - `Q1: Open to opportunities?`
-   - `Q2: Expected salary? (LPA)`
-   - `Q3: Remote preference?`
-5. The app computes genuine-interest score using JD alignment for openness, salary, and remote preference.
-6. Upload JD PDF (or paste JD text) in the **left panel**.
-7. Click `Find Candidates`.
-8. Review:
+2. Upload JD PDF (or paste JD text) in the **left panel**.
+3. Use the **right panel** (candidate side):
+   - **Face 1 (AI mode)**: upload resume PDF and click `Start AI Interview`.
+   - AI asks 3-5 resume-specific questions one by one in chat.
+   - Candidate answers each question; interest score is computed after interview completion.
+4. If Gemini key is missing/invalid/rate-limited, app switches to **Face 2 (fallback mode)**:
+   - submit profile fields (`name`, `skills`, `experience`, `domain`)
+   - complete guided interview:
+     - `Q1: Open to opportunities?`
+     - `Q2: Expected salary? (LPA)`
+     - `Q3: Remote preference?`
+5. In fallback face, app auto-selects candidate and scrolls to interview section after profile submit.
+6. Click `Find Candidates`.
+7. Review:
    - parsed JD
    - ranked candidates
-   - explanation and conversation transcript
+   - explanation and one-line chat summary
    - combined results from sample + live submitted candidates
 
 ## UI Layout
 
 - Left panel: JD parsing and ranked candidate search
-- Right panel: live candidate profile submission + conversation agent
-- Guided interview experience in right panel with step-by-step Q1/Q2/Q3 flow
+- Right panel: dual-face candidate interface
+  - Face 1: AI resume-chat interview (Gemini)
+  - Face 2: fallback guided interview form
 - Wide layout with visual center divider for easier side-by-side usage
 
 ## Fallback Behavior (Important for Demo Reliability)
 
 If Gemini is unavailable due to quota/rate limits:
 
+- app automatically switches candidate panel to fallback face for interview capture
 - app automatically switches to non-LLM fallback for JD parsing/simulated conversation
+- ranking path limits conversation generation to top 5 matched candidates for faster response
 - still produces deterministic shortlist and scores
 - UI clearly shows fallback warning
 
@@ -145,7 +158,8 @@ If Gemini is unavailable due to quota/rate limits:
 
 - Built-in sample candidate data is static (no external ATS integration yet)
 - Live submitted candidates are session-based (not persisted across app restarts)
-- Genuine-interest scoring for live candidates is rule-based and depends on JD signal quality
+- AI interview quality depends on resume text extraction and Gemini availability
+- Fallback live-interest scoring is rule-based and depends on JD signal quality
 - Fallback parser is heuristic-based
 
 ## Future Improvements
@@ -159,8 +173,8 @@ If Gemini is unavailable due to quota/rate limits:
 
 Fill these before final submission:
 
-- Git repository URL: `<add-your-repo-url>`
-- GitHub username: `<add-your-github-username>`
+- Git repository URL: `https://github.com/whyvy-code/AI-Talent-Scouting-Agent`
+- GitHub username: `whyvy-code`
 - Project documentation: `README.md` in repo
 - Demo video link: `<add-video-link>`
-- Project site URL: `http://localhost:8501` (or deployed URL)
+- Project site URL: `http://localhost:8501` or `https://ai-talent-scouting-agent-bvzxjl3ztgvdc5cs3gdnnp.streamlit.app/`
