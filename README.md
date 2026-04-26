@@ -1,6 +1,6 @@
 # AI-Powered Talent Scouting and Engagement Agent
 
-An AI recruitment assistant that parses a Job Description (JD), matches candidate profiles, simulates outreach interest, and returns a ranked shortlist based on:
+An AI recruitment assistant that parses a Job Description (JD), matches candidate profiles, engages candidates through a live conversation panel, and returns a ranked shortlist based on:
 
 - Match Score
 - Interest Score
@@ -15,9 +15,10 @@ This project is built for hackathon submission and includes both:
 This prototype implements:
 
 - JD parsing from uploaded PDF (or pasted text)
-- Candidate discovery from a local candidate pool
+- Candidate discovery from built-in sample pool + live submitted candidate profiles
 - Explainable matching with overlap logic
-- Conversational outreach simulation
+- Conversational outreach simulation for sample candidates
+- Live candidate conversation agent with genuine-interest assessment
 - Ranked output with score breakdown
 
 ## Project Structure
@@ -42,7 +43,9 @@ This prototype implements:
 - `skill_overlap = matched_skills / total_required_skills`
 - `experience_fit = min(candidate_exp / required_exp, 1)`
 - `match_score = 0.6 * skill_overlap + 0.4 * experience_fit`
-- `interest_score` from simulated response sentiment
+- `interest_score`:
+  - for live candidates: guided interview answers matched to JD preferences
+  - for sample candidates: simulated response sentiment
 - `final_score = 0.7 * match_score + 0.3 * interest_score`
 
 ## Setup and Run (Local, Windows)
@@ -56,7 +59,7 @@ Double-click:
 It will:
 
 - install dependencies
-- optionally ask for `GEMINI_API_KEY`
+- launch app and allow entering `GEMINI_API_KEY` in the UI
 - launch app at `http://localhost:8501`
 
 ### Option B: Manual run
@@ -67,7 +70,7 @@ It will:
 pip install -r requirements.txt
 ```
 
-2. (Optional) Set Gemini key:
+2. (Optional) Set Gemini key via environment:
 
 ```powershell
 $env:GEMINI_API_KEY="YOUR_KEY_HERE"
@@ -79,21 +82,44 @@ $env:GEMINI_API_KEY="YOUR_KEY_HERE"
 streamlit run ai_talent_scouting_gemini_clean.py
 ```
 
+4. (Recommended for deployment) enter Gemini key in app:
+   - Open the `Gemini API Key` section in UI
+   - Paste key and click `Use Key`
+   - Or click `Use Fallback Mode` to run without key
+
 ## How to Use
 
 1. Open app in browser.
-2. Upload JD PDF (or paste JD text).
-3. Click `Find Candidates`.
-4. Review:
+2. Use the **right panel** to submit candidate profile data:
+   - name
+   - skills (comma separated)
+   - experience
+   - domain (`IT` or `Sales`)
+3. Complete the guided live interview in the right panel:
+   - `Q1: Open to opportunities?`
+   - `Q2: Expected salary? (LPA)`
+   - `Q3: Remote preference?`
+4. The app computes genuine-interest score using JD alignment for openness, salary, and remote preference.
+5. Upload JD PDF (or paste JD text) in the **left panel**.
+6. Click `Find Candidates`.
+7. Review:
    - parsed JD
    - ranked candidates
-   - explanation and simulated chat
+   - explanation and conversation transcript
+   - combined results from sample + live submitted candidates
+
+## UI Layout
+
+- Left panel: JD parsing and ranked candidate search
+- Right panel: live candidate profile submission + conversation agent
+- Guided interview experience in right panel with step-by-step Q1/Q2/Q3 flow
+- Wide layout with visual center divider for easier side-by-side usage
 
 ## Fallback Behavior (Important for Demo Reliability)
 
 If Gemini is unavailable due to quota/rate limits:
 
-- app automatically switches to non-LLM fallback for JD parsing/conversation
+- app automatically switches to non-LLM fallback for JD parsing/simulated conversation
 - still produces deterministic shortlist and scores
 - UI clearly shows fallback warning
 
@@ -112,8 +138,9 @@ If Gemini is unavailable due to quota/rate limits:
 
 ## Limitations
 
-- Uses static sample candidate pool (no external ATS integration yet)
-- Interest simulation is synthetic
+- Built-in sample candidate data is static (no external ATS integration yet)
+- Live submitted candidates are session-based (not persisted across app restarts)
+- Genuine-interest scoring for live candidates is rule-based and depends on JD signal quality
 - Fallback parser is heuristic-based
 
 ## Future Improvements
