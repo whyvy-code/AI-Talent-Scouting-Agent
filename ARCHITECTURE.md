@@ -3,34 +3,36 @@
 ## High-Level Flow
 
 1. Candidate submits profile in right panel (name, skills, experience, domain)
-2. Live conversation agent runs guided interview:
+2. UI auto-selects that candidate and scrolls to guided interview section
+3. Live conversation agent runs guided interview:
    - Q1: Open to opportunities?
    - Q2: Expected salary? (LPA)
    - Q3: Remote preference?
-3. Agent computes genuine-interest score by matching interview answers to JD preferences
-4. Recruiter uploads JD PDF (or pastes JD text) in left panel
-5. App extracts text from PDF
-6. JD parser creates structured requirements:
+4. Agent computes genuine-interest score by matching interview answers to JD preferences
+5. Recruiter uploads JD PDF (or pastes JD text) in left panel
+6. App extracts text from PDF
+7. JD parser creates structured requirements:
    - skills
    - experience
    - role
    - keywords
-7. JD preference extraction derives optional constraints:
+8. JD preference extraction derives optional constraints:
    - salary range (if present)
    - work mode preference (Remote/Hybrid/Onsite)
-8. Candidate pool is built from:
+9. Candidate pool is built from:
    - built-in sample candidates
    - live submitted candidates (additive, same schema)
-9. Candidate matcher computes match score with explainability
-10. Conversation source for interest:
+10. Candidate matcher computes match score with explainability
+11. Conversation source for interest:
    - guided interview answers for submitted candidates
    - simulated outreach for sample candidates
-11. Final scorer ranks candidates
-12. UI shows parsed JD + ranked shortlist
+12. Final scorer ranks candidates
+13. UI shows parsed JD + ranked shortlist
 
 ## System Components
 
 - UI Layer: Streamlit two-pane layout (left JD search, right live conversation)
+- UX Layer: auto-select + auto-scroll to interview after candidate profile submit
 - Key Management: in-app Gemini key input (password field) with fallback toggle
 - Ingestion Layer: PDF parser (`pypdf`)
 - AI Layer: Gemini via `google-genai` (optional)
@@ -41,7 +43,8 @@
 
 ```mermaid
 flowchart TD
-    A[Candidate Submits Profile] --> B[Guided Interview Q1/Q2/Q3]
+    A[Candidate Submits Profile] --> B[Auto-select + Scroll to Interview]
+    B --> C[Guided Interview Q1/Q2/Q3]
     D[Recruiter Uploads JD PDF] --> E[Extract JD Text]
     E --> F{Gemini Available?}
     F -- Yes --> G[LLM JD Parsing]
@@ -54,8 +57,8 @@ flowchart TD
     J --> L[Combined Candidate Pool]
     K --> L
     L --> M[Skill + Experience Matching]
-    V --> C[JD-Aligned Interest Scoring]
-    B --> C
+    V --> X[JD-Aligned Interest Scoring]
+    C --> X
     M --> N{Candidate Has Guided Answers?}
     N -- Yes --> O[Use Interview-Based Interest Score]
     N -- No --> P{Gemini Available?}

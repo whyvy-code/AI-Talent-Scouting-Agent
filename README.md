@@ -61,6 +61,7 @@ It will:
 - install dependencies
 - launch app and allow entering `GEMINI_API_KEY` in the UI
 - launch app at `http://localhost:8501`
+- in the `Gemini API Key` section, use `Use Key` (LLM mode) or `Use Fallback Mode`
 
 ### Option B: Manual run
 
@@ -82,10 +83,13 @@ $env:GEMINI_API_KEY="YOUR_KEY_HERE"
 streamlit run ai_talent_scouting_gemini_clean.py
 ```
 
-4. (Recommended for deployment) enter Gemini key in app:
+4. Enter Gemini key in app (recommended):
    - Open the `Gemini API Key` section in UI
    - Paste key and click `Use Key`
    - Or click `Use Fallback Mode` to run without key
+
+5. For Streamlit deployment:
+   - Use in-app Gemini key input at launch, or configure `GEMINI_API_KEY` in app secrets/environment
 
 ## How to Use
 
@@ -95,14 +99,15 @@ streamlit run ai_talent_scouting_gemini_clean.py
    - skills (comma separated)
    - experience
    - domain (`IT` or `Sales`)
-3. Complete the guided live interview in the right panel:
+3. After profile submission, app auto-selects that candidate and scrolls to the live interview section.
+4. Complete the guided live interview in the right panel:
    - `Q1: Open to opportunities?`
    - `Q2: Expected salary? (LPA)`
    - `Q3: Remote preference?`
-4. The app computes genuine-interest score using JD alignment for openness, salary, and remote preference.
-5. Upload JD PDF (or paste JD text) in the **left panel**.
-6. Click `Find Candidates`.
-7. Review:
+5. The app computes genuine-interest score using JD alignment for openness, salary, and remote preference.
+6. Upload JD PDF (or paste JD text) in the **left panel**.
+7. Click `Find Candidates`.
+8. Review:
    - parsed JD
    - ranked candidates
    - explanation and conversation transcript
